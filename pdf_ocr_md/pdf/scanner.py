@@ -18,7 +18,6 @@ def scan_pdfs(input_root: Path, output_root: Path) -> List[PdfTask]:
         if pdf_path.is_file():
             relative = pdf_path.relative_to(input_root)
             # 输出目录：去掉 .pdf 后缀，作为目录名；Markdown 文件名为 file.md
-            output_dir = output_root / relative.with_suffix("")
-            output_md_path = output_dir / "file.md"
+            output_md_path = (output_root / relative).with_suffix(".md")
             tasks.append(PdfTask(pdf_path=pdf_path, output_md_path=output_md_path))
     return tasks

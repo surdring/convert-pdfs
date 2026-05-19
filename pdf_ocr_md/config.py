@@ -15,6 +15,10 @@ class AppConfig:
     max_concurrency: int = 4
     max_retries: int = 3
     request_timeout: float = 60.0
+    connect_timeout: float = 10.0
+    read_timeout: float = 60.0
+    write_timeout: float = 60.0
+    pool_timeout: float = 60.0
     log_level: str = "INFO"
     ocr_prompt_preset: str = "default"
 
@@ -28,6 +32,7 @@ class AppConfig:
         concurrency = data.get("concurrency", {})
         retry = data.get("retry", {})
         logging = data.get("logging", {})
+        request_timeout = retry.get("request_timeout", 60.0)
         return cls(
             input_dir=input_dir,
             output_dir=output_dir,
@@ -35,7 +40,11 @@ class AppConfig:
             model=ocr.get("model", "chandra-ocr"),
             max_concurrency=concurrency.get("max_concurrency", 4),
             max_retries=retry.get("max_retries", 3),
-            request_timeout=retry.get("request_timeout", 60.0),
+            request_timeout=request_timeout,
+            connect_timeout=retry.get("connect_timeout", 10.0),
+            read_timeout=retry.get("read_timeout", request_timeout),
+            write_timeout=retry.get("write_timeout", request_timeout),
+            pool_timeout=retry.get("pool_timeout", request_timeout),
             log_level=logging.get("level", "INFO"),
             ocr_prompt_preset=ocr.get("prompt_preset", "default"),
         )
@@ -50,6 +59,10 @@ def build_config_from_args(args) -> AppConfig:
         max_concurrency=args.max_concurrency,
         max_retries=args.max_retries,
         request_timeout=args.request_timeout,
+        connect_timeout=10.0,
+        read_timeout=args.request_timeout,
+        write_timeout=args.request_timeout,
+        pool_timeout=args.request_timeout,
         log_level=getattr(args, "log_level", "INFO"),
         ocr_prompt_preset=getattr(args, "ocr_prompt_preset", "default"),
     )

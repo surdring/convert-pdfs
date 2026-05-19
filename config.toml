@@ -11,7 +11,7 @@ dir = "/home/zhengxueen/workspace/convert-pdfs/PDFS_OUTPUT"
 # 记录已完成和失败的页号。中断后重新运行会自动跳过已完成的页面。
 # 使用 --force-restart 可强制删除状态文件，重新开始所有转换。
 # 使用真实IP地址，其他电脑可以通过此地址访问OCR服务
-server_url = "http://172.16.100.202:8082"
+server_url = "http://172.16.100.211:8082"
 # 模型别名
 model = "chandra-ocr"
 # OCR 提示词模板名称
@@ -19,13 +19,13 @@ prompt_preset = "default"
 
 [concurrency]
 # 最大并发 OCR 请求数（页级全并发，全局共享）
-max_concurrency = 4
+max_concurrency = 3
 
 [retry]
 # 最大重试次数
 max_retries = 10
 # 单次 OCR 请求超时时间（秒）
-request_timeout = 60.0
+request_timeout = 300.0
 
 [logging]
 # 日志级别：DEBUG/INFO/WARNING/ERROR

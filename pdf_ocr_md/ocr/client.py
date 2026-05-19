@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import random
 from typing import Any, Dict, Optional
 
 import httpx
@@ -21,8 +22,25 @@ class OcrClient:
         self._config = config
         self._client: Optional[httpx.AsyncClient] = None
 
+    def _build_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=self._config.connect_timeout,
+            read=self._config.read_timeout,
+            write=self._config.write_timeout,
+            pool=self._config.pool_timeout,
+        )
+
     async def __aenter__(self) -> "OcrClient":
-        self._client = httpx.AsyncClient(base_url=self._config.server_url.rstrip("/"))
+        limits = httpx.Limits(
+            max_connections=max(1, self._config.max_concurrency),
+            max_keepalive_connections=max(1, self._config.max_concurrency),
+        )
+        self._client = httpx.AsyncClient(
+            base_url=self._config.server_url.rstrip("/"),
+            timeout=self._build_timeout(),
+            limits=limits,
+            trust_env=False,
+        )
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -36,6 +54,7 @@ class OcrClient:
         assert self._client is not None, "OcrClient 未初始化，请使用 async with OcrClient(...)"
 
         b64 = base64.b64encode(image_bytes).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
         payload: Dict[str, Any] = {
             "model": self._config.model,
             "messages": [
@@ -45,13 +64,23 @@ class OcrClient:
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{b64}"},
+                            "image_url": {"url": data_url},
                         },
                     ],
                 }
             ],
             "stream": False,
         }
+
+        logger.debug(
+            "发送 OCR 请求：page=%d model=%s server=%s image_bytes=%d data_url_len=%d content_types=%s",
+            page_number,
+            self._config.model,
+            self._config.server_url,
+            len(image_bytes),
+            len(data_url),
+            [c.get("type") for c in payload.get("messages", [{}])[0].get("content", [])],
+        )
 
         last_error: Optional[str] = None
 
@@ -60,7 +89,6 @@ class OcrClient:
                 resp = await self._client.post(
                     "/v1/chat/completions",
                     json=payload,
-                    timeout=self._config.request_timeout,
                 )
 
                 if resp.status_code == 400:
@@ -78,14 +106,17 @@ class OcrClient:
                     last_error = f"HTTP 400: {text}"
                     break
 
-                if resp.status_code >= 500:
+                if resp.status_code != 200:
                     last_error = f"HTTP {resp.status_code}: {resp.text}"
-                    logger.warning(
-                        "OCR 请求失败（第 %d 次重试，页面 %d）：%s",
-                        attempt,
-                        page_number,
-                        last_error,
-                    )
+                    if resp.status_code in {408, 425, 429} or resp.status_code >= 500:
+                        logger.warning(
+                            "OCR 请求失败（第 %d 次重试，页面 %d）：%s",
+                            attempt,
+                            page_number,
+                            last_error,
+                        )
+                    else:
+                        break
                 else:
                     data = resp.json()
                     content = (
@@ -114,7 +145,9 @@ class OcrClient:
                 )
 
             if attempt <= self._config.max_retries:
-                await asyncio.sleep(2 ** (attempt - 1))
+                sleep_seconds = min(30.0, float(2 ** (attempt - 1)))
+                sleep_seconds = sleep_seconds * (1.0 + random.random() * 0.2)
+                await asyncio.sleep(sleep_seconds)
 
         return PageOcrResult(
             page_number=page_number,

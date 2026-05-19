@@ -1,11 +1,11 @@
 # 目录批量 PDF → Markdown 转换工具
 
-> 基于自建 Llama.cpp OCR 模型的异步 Python 脚本
+> 基于自建 Llama.cpp OCR 模型 / AIStudio(layout-parsing) API 的异步 Python 脚本
 
 本项目提供一个命令行工具，用于对指定目录（含子目录）下的所有 PDF 文件进行批量处理：
 
 - 将 PDF 按页渲染为图片；
-- 通过自建 `llama-server` 暴露的 `chandra-ocr` 模型进行 OCR；
+- 通过自建 `llama-server` 暴露的 `chandra-ocr` 模型进行 OCR，或通过 AIStudio(layout-parsing) API 解析；
 - 按页组织为结构化的 Markdown 文档；
 - 保持输入/输出目录结构镜像。
 
@@ -25,6 +25,8 @@
 ```text
 project_root/
   convert_pdfs_to_md.py        # CLI 入口（命令行工具）
+  convert_pdfs_to_md_aistudio.py  # CLI 入口：AIStudio(layout-parsing) token API（整 PDF 一次请求）
+  convert_pdfs_to_md_vllm.py       # CLI 入口：vLLM/OpenAI 兼容后端（可选）
 
   pdf_ocr_md/                  # 主包
     __init__.py
@@ -116,7 +118,16 @@ pip install -r requirements.txt
 - `PyMuPDF`（包名 `PyMuPDF`，导入名 `fitz`）：将 PDF 页面渲染为图片；
 - `httpx`：异步 HTTP 客户端，请求 `llama-server` 的 `/v1/chat/completions` 接口。
 
-### 3.3 Llama.cpp OCR 服务
+### 3.3 AIStudio(layout-parsing) API（可选）
+
+如果你不想自建 OCR 服务，也可以使用 `convert_pdfs_to_md_aistudio.py` 通过 AIStudio 的 token API 完成批量解析。
+
+该脚本的特点：
+
+- 一次请求处理整份 PDF（不是页级调用），通常需要更大的超时；
+- token 建议通过环境变量传入，避免命令行历史泄露。
+
+### 3.4 Llama.cpp OCR 服务
 
 你需要先在目标机器上启动 `llama-server`，并暴露 OpenAI Chat 兼容接口。
 
@@ -204,7 +215,57 @@ python convert_pdfs_to_md.py --max-concurrency 8 --log-level DEBUG
 python convert_pdfs_to_md.py --force-restart
 ```
 
-### 4.4 参数说明
+### 4.4 使用 AIStudio token API 批量转换（可选）
+
+该模式不依赖 `config.toml`，需要显式传入 `--input-dir`/`--output-dir`。
+
+推荐用环境变量提供 token：
+
+```bash
+export AISTUDIO_TOKEN="<your token>"
+python convert_pdfs_to_md_aistudio.py \
+  --input-dir /path/to/PDFS \
+  --output-dir /path/to/PDFS_OUTPUT
+```
+
+下载 markdown 引用图片与输出图片：
+
+```bash
+export AISTUDIO_TOKEN="<your token>"
+python convert_pdfs_to_md_aistudio.py \
+  --input-dir /path/to/PDFS \
+  --output-dir /path/to/PDFS_OUTPUT \
+  --download-images \
+  --download-output-images
+```
+
+并发与超时建议（接口处理整份 PDF，建议超时设置偏大；并发过大容易 429）：
+
+```bash
+export AISTUDIO_TOKEN="<your token>"
+python convert_pdfs_to_md_aistudio.py \
+  --input-dir /path/to/PDFS \
+  --output-dir /path/to/PDFS_OUTPUT \
+  --max-concurrency 1 \
+  --request-timeout 900
+
+
+export AISTUDIO_TOKEN="0fac4cd7ea7e8847d39046db53aebd86d4766099"
+python convert_pdfs_to_md_aistudio.py \
+  --input-dir /home/zhengxueen/workspace/convert-pdfs/PDFS \
+  --output-dir /home/zhengxueen/workspace/convert-pdfs/PDFS_OUTPUT \
+  --download-images \
+  --download-output-images
+
+  export AISTUDIO_TOKEN="0fac4cd7ea7e8847d39046db53aebd86d4766099"
+python convert_pdfs_to_md_aistudio.py \
+  --input-dir /home/zhengxueen/workspace/convert-pdfs/PDFS \
+  --output-dir /home/zhengxueen/workspace/convert-pdfs/PDFS_OUTPUT \
+  --max-concurrency 1 \
+  --request-timeout 1200
+```
+
+### 4.5 参数说明
 
 | 配置项 | TOML 路径 | 默认值 | 说明 |
 | ---- | ---- | ------ | ---- |
@@ -218,7 +279,7 @@ python convert_pdfs_to_md.py --force-restart
 | 日志级别 | `logging.level` | `INFO` | DEBUG/INFO/WARNING/ERROR |
 | OCR 提示词 | `ocr.prompt_preset` | `default` | OCR 提示词模板名称 |
 
-### 4.5 输出结构与命名规则
+### 4.6 输出结构与命名规则
 
 - 输出根目录：由 `output.dir` 指定；
 - 子目录结构：每个 PDF 在输出目录下生成一个同名目录；
@@ -243,7 +304,7 @@ test_output/
         └── .convert_state.json
 ```
 
-### 4.6 日志与统计
+### 4.7 日志与统计
 
 - 日志初始化在 `logging_utils.setup_logging` 中完成，输出到标准输出；
 - 会记录：
@@ -338,23 +399,37 @@ CLI 入口脚本 `convert_pdfs_to_md.py` 中：
 pip install -r requirements.txt
 ```
 
-以及当前执行脚本的目录为项目根目录（包含 `convert_pdfs_to_md.py`）。
+如果你使用了虚拟环境（推荐），请确保：
 
-### Q2. OCR 调用失败，日志中出现 5xx 或网络超时
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+并使用同一个虚拟环境里的 `python` 来运行脚本。
+
+### Q2. token 安全
+
+token 请使用环境变量（如 `AISTUDIO_TOKEN`）提供，避免：
+
+- 写入脚本；
+- 直接出现在命令行参数中（可能进入 shell history）。
+
+### Q3. OCR 调用失败，日志中出现 5xx 或网络超时
 
 - 检查 `llama-server` 是否已经正常启动；
 - 确认 `--server-url` 地址与端口正确无误；
 - 可适当调小 `--max-concurrency` 避免压垮服务；
 - 可调大 `--request-timeout` 以容纳慢请求。
 
-### Q3. 日志里显示 `the request exceeds the available context size`
+### Q4. 日志里显示 `the request exceeds the available context size`
 
 说明单次请求已超出模型上下文长度限制：
 
 - 当前实现中单次只处理一个页面，理论上较难触发；
 - 若仍然触发，多半是某页内容异常复杂，可以先忽略该页结果（脚本会标记为失败页）。
 
-### Q4. 如何只测试少量 PDF？
+### Q5. 如何只测试少量 PDF？
 
 - 建议在一个小目录下放少量 PDF（包含 1~2 页的小文件），
 - 使用该目录作为 `--input-dir`，先验证流程与输出格式，再批量处理大目录。

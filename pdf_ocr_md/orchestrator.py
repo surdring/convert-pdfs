@@ -130,6 +130,8 @@ async def _process_single_pdf(
                     )
                     batch_manager.add_failed(page_number)
                 return result
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.exception(
                     "处理页面失败：%s Page %d",
@@ -147,10 +149,11 @@ async def _process_single_pdf(
 
     # 并发执行待处理页的 OCR 任务
     page_tasks = [ocr_one_page(p) for p in pending_pages]
-    page_results = await asyncio.gather(*page_tasks)
-
-    # 强制写入剩余状态（程序退出前）
-    batch_manager.force_flush()
+    try:
+        page_results = await asyncio.gather(*page_tasks)
+    finally:
+        # 强制写入剩余状态（程序退出前）
+        batch_manager.force_flush()
 
     # 此时内存中的 state 已包含最新进度，且刚刚写回磁盘，
     # 无需再从磁盘重新读取，直接复用内存对象即可

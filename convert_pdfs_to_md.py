@@ -62,6 +62,9 @@ def load_config(args: argparse.Namespace) -> AppConfig:
         config.max_retries = args.max_retries
     if args.request_timeout is not None:
         config.request_timeout = args.request_timeout
+        config.read_timeout = args.request_timeout
+        config.write_timeout = args.request_timeout
+        config.pool_timeout = args.request_timeout
     if args.log_level:
         config.log_level = args.log_level
     if args.ocr_prompt_preset:
@@ -88,7 +91,10 @@ def main() -> None:
     args = parse_args()
     config = load_config(args)
     setup_logging(config.log_level)
-    asyncio.run(async_main(config, force_restart=args.force_restart))
+    try:
+        asyncio.run(async_main(config, force_restart=args.force_restart))
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("收到中断信号，已退出")
 
 
 if __name__ == "__main__":
